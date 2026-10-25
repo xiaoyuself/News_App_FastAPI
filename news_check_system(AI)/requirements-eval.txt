@@ -1,0 +1,27 @@
+# =====================================================================
+# 官方 ragas 评估依赖 —— 建议装到【独立 venv】（ragas 0.4.x 会引入与主环境
+# langchain 1.2 冲突的旧 langchain 依赖）。本文件版本组合已在 Python 3.13
+# 上实测跑通（官方 ragas 出分）。
+#
+#   安装：python -m venv .venv-eval
+#         .venv-eval\Scripts\pip install -r requirements-eval.txt
+#   运行：.venv-eval\Scripts\python evaluate.py
+#   （国内网络可加镜像： -i https://pypi.tuna.tsinghua.edu.cn/simple）
+#
+# 兼容性说明（踩坑记录）：
+#  1) ragas==0.4.3 要求 datasets>=4，而 datasets 5.x + pyarrow>=21 会因 pyarrow 新增
+#     MonthDayNano 类型导致 datasets 指纹(dill)序列化报错 → 锁定 datasets==4.0.0、
+#     pyarrow==20.0.0；
+#  2) 新版 langchain-community 移除了 vertexai 模块而 ragas 仍 import 它 → 若报
+#     ModuleNotFoundError: ...chat_models.vertexai，手动补一个空桩文件：
+#       langchain_community/chat_models/vertexai.py 内含
+#       class ChatVertexAI:  def __init__(self,*a,**k): raise NotImplementedError
+#     （本项目判官用 DeepSeek，不会真正使用 vertexai）；
+#  3) 判官 LLM/Embedding 复用 RAG_NEW/.env 的 DeepSeek + 硅基流动，无需 OpenAI Key。
+# =====================================================================
+ragas==0.4.3
+datasets==4.0.0
+pyarrow==20.0.0
+langchain-openai
+openai
+python-dotenv

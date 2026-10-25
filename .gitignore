@@ -1,0 +1,21 @@
+# 依赖与缓存
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 编辑器
+.idea/
+.vscode/
+
+# 敏感信息：API Key 一律不进仓库
+.env
+*.env.local
+
+# 本地导出的临时文件
+news_app.sql
+*.log
+
+# 归档的旧资料（不需要进仓库）
+_归档/

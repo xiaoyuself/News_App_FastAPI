@@ -1,0 +1,122 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: news-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: Li123456789
+      MYSQL_DATABASE: news_app
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "127.0.0.1:3306:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: news-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - Li123456789
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a Li123456789 ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  milvus:
+    image: milvusdb/milvus:v2.6.0
+    container_name: news-milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      DEPLOY_MODE: STANDALONE
+      CLUSTER_ENABLED: "false"
+      ETCD_USE_EMBED: "true"
+      ETCD_DATA_DIR: /var/lib/milvus/etcd
+      ETCD_CONFIG_PATH: /milvus/configs/advanced/etcd.yaml
+      COMMON_STORAGETYPE: local
+      TZ: Asia/Shanghai
+    volumes:
+      - milvus_data:/var/lib/milvus
+    ports:
+      - "127.0.0.1:19530:19530"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9091/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+
+  backend:
+    build: "./news_check_system(back)"
+    image: news-backend:v1
+    container_name: news-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "mysql+aiomysql://root:Li123456789@mysql:3306/news_app?charset=utf8mb4"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: Li123456789
+      TZ: Asia/Shanghai
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  ai:
+    build: "./news_check_system(AI)"
+    image: news-ai:v1
+    container_name: news-ai
+    restart: unless-stopped
+    env_file:
+      - ./news_check_system(AI)/.env
+    environment:
+      MILVUS_URI: http://milvus:19530
+      LANGSMITH_TRACING: "false"
+      TZ: Asia/Shanghai
+    volumes:
+      # 知识库目录挂载到宿主机：改完文件重启服务即可，不用重建镜像
+      - ./news_check_system(AI)/data:/app/data
+    depends_on:
+      milvus:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8001:8001"
+
+  web:
+    build: "./news_check_system(front)"
+    image: news-web:v1
+    container_name: news-web
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  mysql_data:
+  redis_data:
+  milvus_data:
