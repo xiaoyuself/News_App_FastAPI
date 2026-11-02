@@ -10,6 +10,10 @@ services:
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_general_ci
+      # 2G 小机器省内存：缓冲池降到 64M，关掉 performance_schema、表空间自动扩展检查
+      - --innodb-buffer-pool-size=64M
+      - --performance-schema=off
+      - --max-connections=100
     volumes:
       - mysql_data:/var/lib/mysql
     ports:
@@ -41,32 +45,6 @@ services:
       timeout: 5s
       retries: 10
 
-  milvus:
-    image: milvusdb/milvus:v2.6.0
-    container_name: news-milvus
-    restart: unless-stopped
-    command: ["milvus", "run", "standalone"]
-    security_opt:
-      - seccomp:unconfined
-    environment:
-      DEPLOY_MODE: STANDALONE
-      CLUSTER_ENABLED: "false"
-      ETCD_USE_EMBED: "true"
-      ETCD_DATA_DIR: /var/lib/milvus/etcd
-      ETCD_CONFIG_PATH: /milvus/configs/advanced/etcd.yaml
-      COMMON_STORAGETYPE: local
-      TZ: Asia/Shanghai
-    volumes:
-      - milvus_data:/var/lib/milvus
-    ports:
-      - "127.0.0.1:19530:19530"
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9091/healthz"]
-      interval: 15s
-      timeout: 10s
-      retries: 20
-      start_period: 60s
-
   backend:
     build: "./news_check_system(back)"
     image: news-backend:v1
@@ -94,15 +72,15 @@ services:
     env_file:
       - ./news_check_system(AI)/.env
     environment:
-      MILVUS_URI: http://milvus:19530
+      MILVUS_MODE: lite
+      MILVUS_URI: /app/milvus_data/milvus.db
       LANGSMITH_TRACING: "false"
       TZ: Asia/Shanghai
     volumes:
-      # 知识库目录挂载到宿主机：改完文件重启服务即可，不用重建镜像
+      # 知识库目录挂载到宿主机：改完文件重建索引即可，不用重建镜像
       - ./news_check_system(AI)/data:/app/data
-    depends_on:
-      milvus:
-        condition: service_healthy
+      # milvus-lite 的向量数据文件（.db），持久化保存
+      - milvus_lite_data:/app/milvus_data
     ports:
       - "127.0.0.1:8001:8001"
 
@@ -119,4 +97,4 @@ services:
 volumes:
   mysql_data:
   redis_data:
-  milvus_data:
+  milvus_lite_data:

@@ -37,7 +37,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import vector_store
-from config import MILVUS_URI
+from config import MILVUS_MODE, MILVUS_URI
 from embeddings import get_embeddings
 from generator import ask
 from loader import load_chunks
@@ -78,7 +78,13 @@ def _milvus_host_port():
 
 
 def _milvus_reachable() -> bool:
-    """TCP 探测 Milvus 可达性，避免 MilvusClient 构造长时间挂起。"""
+    """向量库是否可用。
+
+    lite 模式：向量库运行在本进程内（本地 .db 文件），不存在"连不上"的情况，直接可用。
+    server 模式：TCP 探测 Milvus 可达性，避免 MilvusClient 构造长时间挂起。
+    """
+    if MILVUS_MODE == "lite":
+        return True
     host, port = _milvus_host_port()
     try:
         with socket.create_connection((host, port), timeout=PROBE_TIMEOUT):

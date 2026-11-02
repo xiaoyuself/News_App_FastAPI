@@ -1,4 +1,4 @@
-# 新闻资讯平台（内置 RAG 智能客服）
+﻿# 新闻资讯平台（内置 RAG 智能客服）
 
 一个可私有化部署的新闻资讯应用：新闻浏览、用户体系、收藏与浏览历史，并内置基于 RAG 的智能客服。
 
@@ -18,7 +18,7 @@
 | 前端 | 原生 HTML / CSS / JavaScript（无构建依赖，手机风格单页） |
 | 后端 | Python 3.12、FastAPI、SQLAlchemy（异步）、aiomysql、Pydantic |
 | 存储 | MySQL 8（业务数据）、Redis 7（分类/列表缓存） |
-| 智能客服 | LangChain、Milvus（向量库）、DeepSeek（生成）、硅基流动（Embedding / Rerank） |
+| 智能客服 | LangChain、milvus-lite（轻量向量库）、DeepSeek（生成）、硅基流动（Embedding / Rerank） |
 | 部署 | Docker、Docker Compose、nginx 反向代理 |
 
 ## 目录结构
@@ -35,10 +35,10 @@
 │   └── Dockerfile
 ├── news_check_system(AI)/        智能客服：ai_server.py
 │   ├── data/                     知识库（Markdown 手册 + CSV 记录表）
-│   ├── vector_store.py           混合检索 + Milvus 读写
+│   ├── vector_store.py           混合检索 + 向量库读写（server / lite 两种模式）
 │   ├── generator.py              生成
 │   └── Dockerfile
-├── docker-compose.yml            一键编排 6 个容器
+├── docker-compose.yml            一键编排 5 个容器
 ├── database.sql                  数据库结构 + 初始数据
 └── Docker部署速查手册.md          部署、运维、排错、从零重建清单
 ```
@@ -63,7 +63,7 @@ curl -X POST http://127.0.0.1:8001/api/ai/init
 # http://localhost:8080
 ```
 
-对外只暴露 8080 端口，MySQL / Redis / Milvus / 后端 / 客服全部只绑 127.0.0.1。
+对外只暴露 8080 端口，MySQL / Redis / 后端 / 客服全部只绑 127.0.0.1。向量库用 milvus-lite（进程内），2核2G 也能跑。
 
 详细步骤、常见故障、从零重建流程见 [Docker部署速查手册.md](Docker部署速查手册.md)。
 

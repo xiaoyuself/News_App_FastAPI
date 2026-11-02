@@ -5,6 +5,8 @@ langchain-deepseek>=1.0.1
 langchain-core>=1.2.18
 langchain-community>=0.4.2
 pymilvus>=2.6.12
+# 轻量向量库：MILVUS_MODE=lite 时用它，向量存本地 .db 文件，不需要独立 Milvus 服务
+milvus-lite>=3.0
 python-dotenv
 pandas
 jieba

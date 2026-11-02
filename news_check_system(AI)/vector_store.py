@@ -14,7 +14,7 @@ from __future__ import annotations
 from langchain_core.documents import Document
 
 from config import (COLLECTION, DIM, K_FUSE, K_LEXICAL, K_VECTOR,
-                    MILVUS_DB, MILVUS_URI, RRF_K, TOPK)
+                    MILVUS_DB, MILVUS_MODE, MILVUS_URI, RRF_K, TOPK)
 from reranker import rerank as _rerank
 
 # ---------- 词法路：LangChain BM25Retriever（中文需传 jieba 分词） ----------
@@ -65,13 +65,18 @@ def _rrf_fuse(vector_hits: list[tuple[str, str, float]],
 
 # ---------------- Milvus 连接 / 建集合 / 入库 ----------------
 def get_milvus():
-    """连接 Milvus，并确保独立库存在。"""
+    """连接向量库。
+
+    MILVUS_MODE=lite：MilvusClient 直接读写本地 .db 文件（milvus-lite，不需要独立容器）
+    MILVUS_MODE=server（默认）：连独立 Milvus 服务，并切换到项目独立库
+    """
     from pymilvus import MilvusClient
 
     client = MilvusClient(MILVUS_URI)
-    if MILVUS_DB not in client.list_databases():
-        client.create_database(MILVUS_DB)
-    client.use_database(MILVUS_DB)
+    if MILVUS_MODE != "lite":
+        if MILVUS_DB not in client.list_databases():
+            client.create_database(MILVUS_DB)
+        client.use_database(MILVUS_DB)
     return client
 
 
@@ -85,8 +90,14 @@ def build_index(docs: list[Document], embeddings, force: bool = False) -> None:
 
     client = get_milvus()
     exists = client.has_collection(COLLECTION)
-    count = client.get_collection_stats(COLLECTION)["row_count"] if exists else 0
-    if exists and count == len(docs) and not force:
+    count = 0
+    if exists:
+        try:
+            count = client.get_collection_stats(COLLECTION)["row_count"]
+        except Exception:
+            count = 0
+    ready = exists and not force and (MILVUS_MODE == "lite" or count == len(docs))
+    if ready:
         print(f"[milvus] 集合已就绪：{len(docs)} 条，跳过向量化")
         return
 
@@ -111,7 +122,8 @@ def build_index(docs: list[Document], embeddings, force: bool = False) -> None:
                 for t, s, v in zip(texts[i:i + 64], sources[i:i + 64], vectors[i:i + 64])]
         client.insert(collection_name=COLLECTION, data=data)
     client.flush(COLLECTION)
-    print(f"[milvus] 已向量化并入库 {len(docs)} 条 -> {MILVUS_DB}/{COLLECTION}")
+    where = "lite:" + str(MILVUS_URI) if MILVUS_MODE == "lite" else f"{MILVUS_DB}/{COLLECTION}"
+    print(f"[milvus] 已向量化并入库 {len(docs)} 条 -> {where}")
 
 
 # ---------------- 混合检索主入口（语义+BM25 → RRF → Rerank） ----------------

@@ -17,8 +17,11 @@ DATA_DIR = ROOT / "data"
 load_dotenv(ROOT / ".env")
 
 # ---------- Milvus ----------
+# server 模式（默认）：连独立的 Milvus 服务（http://host:19530），约吃 1.2G 内存
+# lite   模式：用 milvus-lite，向量存本地 .db 文件，无独立进程（2G 小机器用这个）
+MILVUS_MODE = os.getenv("MILVUS_MODE", "server")
 MILVUS_URI = os.getenv("MILVUS_URI", "http://localhost:19530")
-MILVUS_DB = "rag_new"        # 本项目独立库，不影响已有库
+MILVUS_DB = "rag_new"        # 仅 server 模式使用（lite 只有默认库）
 COLLECTION = "doc_chunks"
 DIM = 1024                   # Qwen3-Embedding-0.6B 维度
 TOPK = 4                     # 问答默认检索片段数
