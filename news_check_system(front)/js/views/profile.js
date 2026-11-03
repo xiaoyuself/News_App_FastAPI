@@ -301,7 +301,8 @@ window.ProfileView = {
         ev.stopPropagation();
         try {
           if (kind === 'fav') await API.removeFavorite(item.id);
-          else await API.deleteHistory(item.id);
+          // 历史记录要按 historyId 删（同一条新闻可能在不同时间被看过多条记录时不会误删）
+          else await API.deleteHistory(item.historyId);
           toast(kind === 'fav' ? '已取消收藏' : '已删除');
           const idx = st.list.indexOf(item);
           if (idx > -1) st.list.splice(idx, 1);

@@ -39,12 +39,14 @@ class UserAuthResponse(BaseModel):
 
 
 # 用户更新信息的模型类
+# 全部用 Optional：前端"把昵称/简介清空"时发的是 null，
+# 原来写成 nickname: str = None，收到 null 会被 pydantic 判为类型错误直接 422
 class UserUpdateRequest(BaseModel):
-    nickname: str = None
-    avatar: str = None
-    gender: str = None
-    bio: str = None
-    phone: str = None
+    nickname: Optional[str] = Field(None, max_length=50)
+    avatar: Optional[str] = Field(None, max_length=255)
+    gender: Optional[str] = Field(None, max_length=10)
+    bio: Optional[str] = Field(None, max_length=500)
+    phone: Optional[str] = Field(None, max_length=20)
 
 
 #更改密码请求传入的模型类，包含新旧密码

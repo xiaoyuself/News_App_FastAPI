@@ -32,8 +32,12 @@ async def add_favorite(
         user:User=Depends(get_current_user),
         session:AsyncSession = Depends(get_session)
 ):
-    result = await add_news_favorite(session,user.id,data.news_id)
-    return success_response(message='添加收藏成功',data = result)
+    # 已收藏就直接返回成功（幂等）：前端快速连点、或多端同时点，
+    # 不应该给用户弹一个"数据约束冲突"的报错
+    if await is_news_favorite(session, user_id=user.id, news_id=data.news_id):
+        return success_response(message='该新闻已在收藏中', data={'newsId': data.news_id, 'added': False})
+    await add_news_favorite(session,user.id,data.news_id)
+    return success_response(message='添加收藏成功', data={'newsId': data.news_id, 'added': True})
 
 
 #清除新闻收藏状态路由

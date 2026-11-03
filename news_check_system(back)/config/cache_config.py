@@ -9,13 +9,18 @@ REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD") or None
 
 #创建redis连接对象
+# socket_connect_timeout / socket_timeout：Redis 挂掉时 1 秒内放弃、2 秒内读完，
+# 而不是一直等（不设这两个值，Redis 一停，新闻接口会长时间不返回，前端一直"加载中"）
 redis_client = redis.Redis(
     host=REDIS_HOST,
     port=REDIS_PORT,
     db=REDIS_DB,
     password=REDIS_PASSWORD,
     decode_responses=True,
-    protocol=2
+    protocol=2,
+    socket_connect_timeout=1.0,
+    socket_timeout=2.0,
+    health_check_interval=30,
 )
 
 #获取字符串类缓存

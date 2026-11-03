@@ -1,6 +1,10 @@
 /**
  * 新闻列表视图：顶部新闻分类 + 分类下的新闻列表（分页加载）
  * 路由： #/news
+ *
+ * 体验说明：
+ *  - 从详情页返回时直接复用上次的列表和滚动位置，不会又跳回第一页（原来每次返回都会重新拉第 1 页）
+ *  - 加载失败时给出"重试"按钮，而不是只有一行报错
  */
 window.NewsView = {
   state: {
@@ -9,6 +13,9 @@ window.NewsView = {
     page: 1,
     hasMore: false,
     loading: false,
+    cards: [],      // 已经加载到的新闻（用于返回时还原）
+    total: 0,
+    scrollY: 0,     // 点击进入详情前的滚动位置
   },
 
   async render() {
@@ -17,6 +24,16 @@ window.NewsView = {
     setTabActive('news');
 
     const main = document.getElementById('app-main');
+
+    // 已经有列表内容（比如从详情页返回）→ 立刻按原样画出来，再静默刷新分类
+    if (this.state.cards.length && this.state.activeCategoryId != null) {
+      this.renderShell();
+      this.paintCards();
+      window.scrollTo(0, this.state.scrollY || 0);
+      this.refreshCategoriesInBackground();
+      return;
+    }
+
     main.innerHTML = '<div class="loading">加载中...</div>';
 
     try {
@@ -32,6 +49,7 @@ window.NewsView = {
 
       this.state.page = 1;
       this.state.hasMore = false;
+      this.state.cards = [];
       this.renderShell();
 
       if (this.state.activeCategoryId != null) {
@@ -40,8 +58,29 @@ window.NewsView = {
         document.getElementById('news-list').innerHTML = '<div class="empty">暂无新闻分类</div>';
       }
     } catch (e) {
-      main.innerHTML = '<div class="error">' + escapeHtml(e.message) + '</div>';
+      main.innerHTML = this.errorHtml(e.message);
+      this.bindRetry();
     }
+  },
+
+  /** 分类变化（后台静默刷新）：只为让新加的分类能出现，不打断当前列表 */
+  async refreshCategoriesInBackground() {
+    try {
+      const categories = await API.getCategories();
+      if (!categories.length) return;
+      const changed = categories.length !== this.state.categories.length ||
+        categories.some((c, i) => !this.state.categories[i] || this.state.categories[i].id !== c.id ||
+          this.state.categories[i].name !== c.name);
+      if (!changed) return;
+      this.state.categories = categories;
+      if (!categories.some(c => c.id === this.state.activeCategoryId)) {
+        this.state.activeCategoryId = categories[0].id;
+        this.state.cards = [];
+        this.state.page = 1;
+      }
+      this.renderShell();
+      this.paintCards();
+    } catch (e) { /* 后台刷新失败不打扰用户 */ }
   },
 
   /** 渲染分类栏 + 列表骨架 */
@@ -67,8 +106,26 @@ window.NewsView = {
     // 新闻卡片点击（事件委托，避免重复绑定）
     document.getElementById('news-list').addEventListener('click', (e) => {
       const card = e.target.closest('.news-card[data-id]');
-      if (card) Router.navigate('news/' + card.dataset.id);
+      if (card) {
+        // 记住当前位置，从详情返回时能回到原处
+        this.state.scrollY = window.scrollY;
+        Router.navigate('news/' + card.dataset.id);
+      }
     });
+  },
+
+  /** 把已加载的卡片一次性画出来 */
+  paintCards() {
+    const listEl = document.getElementById('news-list');
+    const btn = document.getElementById('load-more-btn');
+    if (!listEl) return;
+    if (!this.state.cards.length) {
+      listEl.innerHTML = '<div class="empty">该分类暂无新闻</div>';
+      if (btn) btn.classList.add('hidden');
+      return;
+    }
+    listEl.innerHTML = this.state.cards.map(item => this.cardHtml(item)).join('');
+    if (btn) btn.classList.toggle('hidden', !this.state.hasMore);
   },
 
   /** 切换分类：重置分页并重新加载 */
@@ -77,6 +134,7 @@ window.NewsView = {
     this.state.activeCategoryId = categoryId;
     this.state.page = 1;
     this.state.hasMore = false;
+    this.state.cards = [];
 
     // 更新分类高亮
     document.querySelectorAll('.chip').forEach(el => {
@@ -96,31 +154,65 @@ window.NewsView = {
     const btn = document.getElementById('load-more-btn');
     if (!listEl) { this.state.loading = false; return; }
 
-    if (reset) listEl.innerHTML = '<div class="loading">加载中...</div>';
+    if (reset) {
+      listEl.innerHTML = '<div class="loading">加载中...</div>';
+      this.state.cards = [];
+    }
+    if (btn && !reset) {
+      btn.disabled = true;
+      btn.textContent = '加载中...';
+    }
 
     try {
-      const { list, hasMore } = await API.getNewsList(this.state.activeCategoryId, this.state.page);
+      const { list, hasMore, total } = await API.getNewsList(this.state.activeCategoryId, this.state.page);
       if (reset) listEl.innerHTML = '';
 
-      if (list.length === 0 && reset) {
+      this.state.cards = this.state.cards.concat(list);
+      this.state.hasMore = hasMore;
+      this.state.total = total;
+      this.state.page += 1;
+
+      if (!this.state.cards.length) {
         listEl.innerHTML = '<div class="empty">该分类暂无新闻</div>';
-        if (btn) btn.classList.add('hidden');
+      } else if (reset) {
+        this.paintCards();
       } else {
+        // 追加：只插入新增的那几条，避免整块重绘导致图片闪一下
         listEl.insertAdjacentHTML('beforeend', list.map(item => this.cardHtml(item)).join(''));
-        this.state.hasMore = hasMore;
         if (btn) btn.classList.toggle('hidden', !hasMore);
       }
-      this.state.page += 1;
     } catch (e) {
-      listEl.innerHTML = '<div class="error">' + escapeHtml(e.message) + '</div>';
+      listEl.innerHTML = this.errorHtml(e.message);
+      this.bindRetry();
     } finally {
       this.state.loading = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '加载更多';
+      }
+    }
+  },
+
+  /** 统一的错误块（带重试按钮） */
+  errorHtml(message) {
+    return `<div class="error">${escapeHtml(message)}
+      <div><button class="btn-retry" id="retry-btn">点我重试</button></div>
+    </div>`;
+  },
+
+  bindRetry() {
+    const btn = document.getElementById('retry-btn');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        if (this.state.cards.length) { this.loadMore(false); }
+        else { this.state.page = 1; this.loadMore(true); }
+      });
     }
   },
 
   cardHtml(item) {
     const cover = item.image
-      ? `<img class="news-cover" src="${escapeHtml(item.image)}" alt="" onerror="this.onerror=null;this.src=window.placeholderImage('📰')">`
+      ? `<img class="news-cover" src="${escapeHtml(item.image)}" alt="" loading="lazy" onerror="this.onerror=null;this.src=window.placeholderImage('📰')">`
       : `<div class="news-cover" style="display:flex;align-items:center;justify-content:center;font-size:30px;">📰</div>`;
     return `
       <div class="news-card" data-id="${item.id}">

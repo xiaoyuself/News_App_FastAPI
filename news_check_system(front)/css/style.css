@@ -318,6 +318,20 @@ body {
   font-size: 13px;
   cursor: pointer;
 }
+.load-more:disabled { opacity: 0.6; cursor: default; }
+
+/* 加载失败时的重试按钮 */
+.btn-retry {
+  margin-top: 14px;
+  border: 1px solid var(--primary);
+  background: var(--bg-card);
+  color: var(--primary);
+  border-radius: 999px;
+  padding: 7px 24px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-retry:active { background: var(--primary-light); }
 
 /* ============================ 新闻详情页 ============================ */
 .detail-page { padding: 16px; }

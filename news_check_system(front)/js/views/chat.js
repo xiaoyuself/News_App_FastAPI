@@ -14,6 +14,8 @@
 window.ChatView = {
   // 会话消息缓存（切换页面后保留，刷新页面清空）
   _messages: [],
+  // 是否正在等上一次回答：等回答期间不允许再发，避免连点发出一堆并发请求
+  _busy: false,
 
   render() {
     setHeader({ title: 'AI对话', showBack: false, right: '' });
@@ -30,11 +32,12 @@ window.ChatView = {
         </div>
       </div>`;
 
-    // 首次进入添加欢迎语
+    // 首次进入添加欢迎语（标 welcome，多轮时不会把它当历史发给服务端）
     if (this._messages.length === 0) {
       this._messages.push({
         role: 'assistant',
-        text: '您好！我是新闻软件智能客服助手 🤖\n您可以问我关于注册登录、新闻浏览、收藏、浏览记录、修改密码等问题。',
+        welcome: true,
+        text: '您好！我是新闻软件智能客服助手 🤖\n您可以问我关于注册登录、密码修改与找回、新闻浏览、收藏、浏览记录等问题。',
       });
     }
     this._messages.forEach(m => this.appendMsg(m.role, m.text, false));
@@ -53,6 +56,20 @@ window.ChatView = {
     };
     send.addEventListener('click', doSend);
     input.addEventListener('keydown', e => { if (e.key === 'Enter') doSend(); });
+
+    // 若切换页面回来时上一次回答还没结束，保持"回答中"状态
+    this.setInputEnabled(!this._busy);
+  },
+
+  /** 回答过程中禁用输入框和按钮，避免连点发出一堆并发请求 */
+  setInputEnabled(enabled) {
+    const btn = document.getElementById('chat-send');
+    const input = document.getElementById('chat-input');
+    if (btn) {
+      btn.disabled = !enabled;
+      btn.textContent = enabled ? '发送' : '回答中';
+    }
+    if (input) input.disabled = !enabled;
   },
 
   /** 追加一条消息到界面（keepScroll=false 时自动滚动到底部） */
@@ -76,7 +93,7 @@ window.ChatView = {
   appendQuickChips() {
     const box = document.getElementById('chat-messages');
     if (!box) return;
-    const chips = ['如何注册账号？', '如何收藏新闻？', '浏览记录在哪里查看？', '如何修改密码？'];
+    const chips = ['如何注册账号？', '如何收藏新闻？', '浏览记录在哪里查看？', '忘记密码怎么找回？'];
     const wrap = document.createElement('div');
     wrap.className = 'chat-quick';
     wrap.innerHTML = chips.map(c => `<div class="chip" data-q="${escapeHtml(c)}">${escapeHtml(c)}</div>`).join('');
@@ -89,6 +106,20 @@ window.ChatView = {
 
   /** 发送一条消息并请求 AI 回复 */
   async send(text) {
+    if (this._busy) {
+      toast('上一条还在回答中，请稍候');
+      return;
+    }
+
+    // 先取历史，再把自己这句加进去（历史里不含本轮问题和欢迎语）
+    const history = this._messages
+      .filter(m => !m.welcome)
+      .slice(-6)                                  // 最近 3 轮（一问一答 = 2 条）
+      .map(m => ({ role: m.role, content: m.text }));
+
+    this._busy = true;
+    this.setInputEnabled(false);
+
     this._messages.push({ role: 'user', text });
     this.appendMsg('user', text);
 
@@ -101,19 +132,21 @@ window.ChatView = {
     box.scrollTop = box.scrollHeight;
 
     try {
-      const answer = await API.chat(text);
+      const answer = await API.chat(text, history);
       thinking.querySelector('.bubble').textContent = answer;
       this._messages.push({ role: 'assistant', text: answer });
     } catch (e) {
-      // AI 服务不可用时的降级提示（大模型接口已预留，服务就绪后即可联通）
+      // AI 服务不可用时的降级提示
       const fallback = '抱歉，智能客服暂时无法回答：' + e.message + '\n\n' +
         '可能原因：\n' +
-        '1. AI 服务未启动：运行 RAG_NEW/ai_server.py（依赖 .env 中的 API Key）\n' +
-        '2. Milvus 知识库服务未启动：请先启动 Milvus（默认 http://localhost:19530），' +
-        '否则除问候语外的提问无法检索知识库\n\n' +
-        '您也可以先通过「个人中心」体验注册登录、收藏、浏览记录、修改密码等功能。';
+        '1. 智能客服服务未启动（news_check_system(AI)，端口 8001）\n' +
+        '2. 向量库连不上（Docker 里向量库随 ai 容器启动，本地运行需自行启动 Milvus）\n\n' +
+        '您可以先通过「个人中心」体验注册登录、收藏、浏览记录、修改密码等功能。';
       thinking.querySelector('.bubble').textContent = fallback;
       this._messages.push({ role: 'assistant', text: fallback });
+    } finally {
+      this._busy = false;
+      this.setInputEnabled(true);
     }
     box.scrollTop = box.scrollHeight;
   },

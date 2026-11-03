@@ -14,7 +14,7 @@ async def categories(db:AsyncSession = Depends(get_session),skip:int=0,limit:int
     #返回数据
     return {
         'code':200,
-        'message':'sucess',
+        'message':'success',
         'data':categories
     }
 
@@ -23,8 +23,8 @@ async def categories(db:AsyncSession = Depends(get_session),skip:int=0,limit:int
 async def news_list(
         db:AsyncSession = Depends(get_session),
         category_id:int = Query(...,alias='categoryId'),
-        page:int = 1,
-        page_size:int=Query(10,alias='pageSize',le=100)
+        page:int = Query(1,ge=1),
+        page_size:int=Query(10,alias='pageSize',ge=1,le=100)
 ):
     #根据页数和每页的数量设置skip
     skip = (page-1)*page_size

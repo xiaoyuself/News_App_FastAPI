@@ -15,3 +15,10 @@ httpx
 # ai_server.py HTTP 服务依赖
 fastapi
 uvicorn
+# PDF 知识库（data/pdf/*.pdf）
+pymupdf
+# 扫描件/截图 OCR：纯 CPU 推理，模型已打包在 whl 里，不需要额外下载
+rapidocr
+# rapidocr 从 2.0.6 起不再自带推理引擎，必须显式装，否则运行时 OCR 报"找不到引擎"
+onnxruntime
+opencv-python-headless

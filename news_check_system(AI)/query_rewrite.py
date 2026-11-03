@@ -7,7 +7,8 @@ query_rewrite.py —— Query 改写：Multi-Query（一条 query 拆成多条�
 """
 from __future__ import annotations
 
-from langchain.chat_models import init_chat_model
+import threading
+
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from config import CHAT_API_KEY, CHAT_BASE_URL, CHAT_MODEL, TOPK
@@ -20,17 +21,71 @@ _MQ_SYS = (
     "3) 只输出查询本身，不要编号、不要解释。"
 )
 
+# 复用 chat 实例（低置信度时才会走到这里，但一次问答要调 1 次，同样别重复初始化）
+_chat = None
+_chat_lock = threading.Lock()
+
+
+def _get_chat():
+    global _chat
+    if _chat is not None:
+        return _chat
+    with _chat_lock:
+        if _chat is None:
+            from langchain.chat_models import init_chat_model
+
+            _chat = init_chat_model(
+                model=CHAT_MODEL,
+                model_provider="deepseek",
+                api_key=CHAT_API_KEY,
+                base_url=CHAT_BASE_URL,
+                temperature=0.0,
+                max_tokens=256,
+            )
+    return _chat
+
+
+_RW_SYS = (
+    "你是对话改写助手。请结合对话历史，把用户最后一句话改写成一句"
+    "不依赖上下文、可以单独拿去检索的完整问题。\n"
+    "要求：1) 补全代词指代（它 / 这个 / 那个）和省略的主语；2) 保留原意，不要新增信息；"
+    "3) 只输出改写后的问题本身，不要解释、不要加引号。"
+)
+
+
+def rewrite_with_history(question: str, history: list[dict]) -> str:
+    """多轮对话里把 "它要收费吗" 改写成 "收藏功能要收费吗" 再做检索。
+
+    不改写的话，拿 "它要收费吗" 去向量库检索什么都搜不到，
+    模型只能靠历史硬答，容易脱离知识库编答案。
+    改写失败就退回原问题，不让主链路中断。
+    """
+    if not history:
+        return question
+    lines = []
+    for h in history:
+        content = (h.get("content") or "").strip()
+        if not content:
+            continue
+        who = "用户" if h.get("role") == "user" else "客服"
+        lines.append(f"{who}：{content}")
+    if not lines:
+        return question
+
+    prompt = ("对话历史：\n" + "\n".join(lines)
+              + f"\n\n用户最后一句话：{question}\n\n改写后的完整问题：")
+    try:
+        resp = _get_chat().invoke([SystemMessage(content=_RW_SYS), HumanMessage(content=prompt)])
+        out = str(resp.content or "").strip().strip('"').strip("“”").strip()
+        return out or question
+    except Exception as e:  # noqa: BLE001
+        print(f"[rewrite] 改写失败，改用原问题：{type(e).__name__}: {str(e)[:80]}")
+        return question
+
 
 def multi_query(question: str, n: int = 3) -> list[str]:
     """把一个问题拆成 n 条不同表述的查询（Multi-Query）。"""
-    chat = init_chat_model(
-        model=CHAT_MODEL,
-        model_provider="deepseek",
-        api_key=CHAT_API_KEY,
-        base_url=CHAT_BASE_URL,
-        temperature=0.0,
-        max_tokens=256,
-    )
+    chat = _get_chat()
     resp = chat.invoke([
         SystemMessage(content=_MQ_SYS),
         HumanMessage(content=f"用户问题：{question}\n请生成 {n} 条不同表述："),

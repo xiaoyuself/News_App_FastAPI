@@ -11,10 +11,13 @@ vector_store.py —— 检索层（存储侧 + 检索策略）
 """
 from __future__ import annotations
 
+import threading
+
 from langchain_core.documents import Document
 
 from config import (COLLECTION, DIM, K_FUSE, K_LEXICAL, K_VECTOR,
-                    MILVUS_DB, MILVUS_MODE, MILVUS_URI, RRF_K, TOPK)
+                    MILVUS_DB, MILVUS_LITE_PATH, MILVUS_MODE, MILVUS_URI,
+                    RRF_K, TOPK)
 from reranker import rerank as _rerank
 
 # ---------- 词法路：LangChain BM25Retriever（中文需传 jieba 分词） ----------
@@ -64,20 +67,40 @@ def _rrf_fuse(vector_hits: list[tuple[str, str, float]],
 
 
 # ---------------- Milvus 连接 / 建集合 / 入库 ----------------
+_client = None          # 复用同一个 MilvusClient：每问一句都新建一个客户端太费
+_client_lock = threading.Lock()
+
+
 def get_milvus():
-    """连接向量库。
+    """连接向量库（进程内复用同一个客户端）。
 
     MILVUS_MODE=lite：MilvusClient 直接读写本地 .db 文件（milvus-lite，不需要独立容器）
     MILVUS_MODE=server（默认）：连独立 Milvus 服务，并切换到项目独立库
-    """
-    from pymilvus import MilvusClient
 
-    client = MilvusClient(MILVUS_URI)
-    if MILVUS_MODE != "lite":
-        if MILVUS_DB not in client.list_databases():
-            client.create_database(MILVUS_DB)
-        client.use_database(MILVUS_DB)
-    return client
+    为什么要复用：lite 模式下每次 new MilvusClient 都要重新打开 .db 文件，
+    一次问答要调用 2~3 次（检索 / BM25 语料 / 建库），每次都重开会让首次提问明显变慢。
+    """
+    global _client
+    if _client is not None:
+        return _client
+    with _client_lock:
+        if _client is None:
+            from pymilvus import MilvusClient
+
+            client = MilvusClient(MILVUS_LITE_PATH if MILVUS_MODE == "lite" else MILVUS_URI)
+            if MILVUS_MODE != "lite":
+                if MILVUS_DB not in client.list_databases():
+                    client.create_database(MILVUS_DB)
+                client.use_database(MILVUS_DB)
+            _client = client
+    return _client
+
+
+def reset_milvus():
+    """丢弃缓存的客户端（重建索引 / 切换向量库时用）。"""
+    global _client
+    with _client_lock:
+        _client = None
 
 
 def build_index(docs: list[Document], embeddings, force: bool = False) -> None:
@@ -122,7 +145,7 @@ def build_index(docs: list[Document], embeddings, force: bool = False) -> None:
                 for t, s, v in zip(texts[i:i + 64], sources[i:i + 64], vectors[i:i + 64])]
         client.insert(collection_name=COLLECTION, data=data)
     client.flush(COLLECTION)
-    where = "lite:" + str(MILVUS_URI) if MILVUS_MODE == "lite" else f"{MILVUS_DB}/{COLLECTION}"
+    where = "lite:" + str(MILVUS_LITE_PATH) if MILVUS_MODE == "lite" else f"{MILVUS_DB}/{COLLECTION}"
     print(f"[milvus] 已向量化并入库 {len(docs)} 条 -> {where}")
 
 

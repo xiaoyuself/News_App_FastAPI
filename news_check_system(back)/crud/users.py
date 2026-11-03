@@ -85,11 +85,13 @@ async def get_user_by_token(session:AsyncSession,token:str):
 
 #更新数据库中的用户信息
 async def update_user(session:AsyncSession,user_date:UserUpdateRequest,user_name:str):
-    #根据用户名修改对应的数据，其中user_date是自定义的模型类，需要先转成字典再转成k=v形式，参数设置为排除空值和默认值
-    order = update(User).where(User.username == user_name).values(**user_date.model_dump(
-        exclude_none=True,
-        exclude_unset=True,
-    ))
+    #根据用户名修改对应的数据，其中user_date是自定义的模型类，需要先转成字典再转成k=v形式
+    # 注意：这里只排除"没传的字段"（exclude_unset），不能再排除 None，
+    # 否则用户把昵称/简介清空时（前端发 null）这些字段会被当成"没传"而改不掉
+    data = user_date.model_dump(exclude_unset=True)
+    if not data:
+        raise HTTPException(status_code=400,detail='没有需要更新的内容')
+    order = update(User).where(User.username == user_name).values(**data)
     res = await session.execute(order)
     await session.commit()
     #如果没有受影响的行数，报错

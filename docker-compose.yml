@@ -63,6 +63,13 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:8000:8000"
+    healthcheck:
+      # 用 python 自带的 urllib 探活（slim 镜像里没有 curl）
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/',timeout=3).status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   ai:
     build: "./news_check_system(AI)"
@@ -73,7 +80,9 @@ services:
       - ./news_check_system(AI)/.env
     environment:
       MILVUS_MODE: lite
-      MILVUS_URI: /app/milvus_data/milvus.db
+      # lite 模式的本地 .db 路径。⚠️ 变量名不能叫 MILVUS_URI：
+      # pymilvus 3.x 在 import 时就读取 MILVUS_URI 并校验成 http(s):// 形式，传文件路径会直接报错
+      MILVUS_LITE_PATH: /app/milvus_data/milvus.db
       LANGSMITH_TRACING: "false"
       TZ: Asia/Shanghai
     volumes:
@@ -83,6 +92,13 @@ services:
       - milvus_lite_data:/app/milvus_data
     ports:
       - "127.0.0.1:8001:8001"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/',timeout=3).status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      # 首次启动要在后台下载/加载向量库并建索引，给足 90 秒
+      start_period: 90s
 
   web:
     build: "./news_check_system(front)"
@@ -92,7 +108,8 @@ services:
     ports:
       - "8080:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   mysql_data:

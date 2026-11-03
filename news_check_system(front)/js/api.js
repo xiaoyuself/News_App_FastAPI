@@ -1,11 +1,9 @@
 /**
  * API 请求层
  *
- * ⚠️ 重要说明（后端 Token 认证的坑）：
- * 后端 utils/auth.py 中提取 token 的代码是 authorization.replace("Beared", "")，
- * 并没有真正去掉 "Bearer " 前缀，所以前端不能发送标准的 "Bearer xxx"，
- * 而应直接发送原始 token（不带任何前缀），后端才能正确匹配。
- * 因此下面 authHeaders() 返回 { Authorization: token }（只有 token 本身）。
+ * 鉴权说明：后端 utils/auth.py 现在既认标准 `Authorization: Bearer <token>`，
+ * 也兼容历史遗留的"裸 token"（早期由于后端把 Bearer 拼成了 Beared，前端只能发裸 token）。
+ * 这里统一发标准写法 Bearer，语义更正确，也方便以后换 JWT / 网关鉴权。
  */
 
 const STORAGE_KEYS = { token: 'news_token', user: 'news_user' };
@@ -26,10 +24,32 @@ function clearAuth() {
   Store.remove(STORAGE_KEYS.user);
 }
 
-/** 构造认证请求头：直接带原始 token（不带 Bearer 前缀，见文件头注释） */
+/** 构造认证请求头：标准 Bearer 写法 */
 function authHeaders() {
   const token = getToken();
-  return token ? { Authorization: token } : {};
+  return token ? { Authorization: 'Bearer ' + token } : {};
+}
+
+/**
+ * 从错误响应里取出"人能看懂"的提示。
+ * 后端业务错误是 { code, message, data }；
+ * 参数校验失败(422) 是 { code, message, data }（后端已统一），
+ * 但为兼容 FastAPI 原生格式，也支持 detail 为字符串或数组的情况。
+ */
+function errorMessage(json, status) {
+  if (!json) return `请求失败（HTTP ${status}）`;
+  if (typeof json.message === 'string' && json.message) return json.message;
+  if (typeof json.detail === 'string' && json.detail) return json.detail;
+  if (Array.isArray(json.detail)) {
+    const parts = json.detail.map(d => {
+      const loc = Array.isArray(d.loc)
+        ? d.loc.filter(x => x !== 'body' && x !== 'query' && x !== 'path').join('.')
+        : '';
+      return loc ? `${loc}：${d.msg}` : d.msg;
+    }).filter(Boolean);
+    if (parts.length) return parts.join('；');
+  }
+  return `请求失败（HTTP ${status}）`;
 }
 
 /**
@@ -67,7 +87,7 @@ async function request(path, options = {}) {
   // 注意：本后端注册了自定义异常处理器（utils/exception.py），错误响应格式为
   //   { code, message, data }（不是标准 FastAPI 的 { detail }），因此优先取 message，其次 detail。
   if (!res.ok) {
-    const msg = (json && (json.message || json.detail)) || `请求失败（HTTP ${res.status}）`;
+    const msg = errorMessage(json, res.status);
     // 仅当"带着 token 访问受保护接口"（auth=true）返回 401 时，才视为会话过期；
     // 登录/注册接口（auth=false）返回 401 属于"用户名或密码错误"，直接展示后端提示即可，
     // 否则会出现"点击登录没反应/被当成登录过期"的误导。
@@ -81,7 +101,7 @@ async function request(path, options = {}) {
 
   // 业务层错误
   if (json && json.code !== 200) {
-    throw new Error(json.message || '请求失败');
+    throw new Error(errorMessage(json, res.status));
   }
 
   return json ? json.data : null;
@@ -188,9 +208,9 @@ async function addFavorite(newsId) {
   return await request('/api/favorite/add', { method: 'POST', body: { newsId } });
 }
 
-/** 取消收藏 */
+/** 取消收藏（后端是 DELETE 方法，这里必须显式指定，否则会发成 GET -> 405 Method Not Allowed） */
 async function removeFavorite(newsId) {
-  return await request('/api/favorite/remove', { params: { newsId } });
+  return await request('/api/favorite/remove', { method: 'DELETE', params: { newsId } });
 }
 
 /** 收藏列表（分页） */
@@ -225,11 +245,9 @@ async function getHistoryList(page, pageSize = CONFIG.PAGE_SIZE) {
   };
 }
 
-/** 删除一条浏览记录
- *  ⚠️ 注意：后端路由参数虽名为 history_id，但 crud 实际按 news_id 删除，
- *  所以这里传入新闻 id 即可正确删除对应记录 */
-async function deleteHistory(newsId) {
-  return await request('/api/history/delete/' + newsId, { method: 'DELETE' });
+/** 删除一条浏览记录（按历史记录自己的 id 删除，见后端 /api/history/delete/{history_id}） */
+async function deleteHistory(historyId) {
+  return await request('/api/history/delete/' + historyId, { method: 'DELETE' });
 }
 
 /** 清空浏览记录 */
@@ -243,11 +261,12 @@ async function clearHistory() {
 const AI_CHAT_TIMEOUT = 130000;
 
 /**
- * 向智能客服发送问题（预留的大模型调用接口）
- * 后端由 RAG_NEW/ai_server.py 提供（LangChain + Milvus RAG），默认端口 8001。
- * 带超时保护：AI 服务挂起时最多等待 AI_CHAT_TIMEOUT，超时抛错，不会一直"正在思考"。
+ * 向智能客服发送问题（支持多轮）
+ * @param {string} question 本轮问题
+ * @param {Array} history 最近几轮对话 [{role:'user'|'assistant', content:'...'}]
+ *                        只放问答内容，不要放检索片段（片段由服务端每轮重新检索）
  */
-async function chat(question) {
+async function chat(question, history) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), AI_CHAT_TIMEOUT);
   let res;
@@ -255,7 +274,7 @@ async function chat(question) {
     res = await fetch(CONFIG.AI_BASE_URL + '/api/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, history: history || [] }),
       signal: controller.signal,
     });
   } catch (e) {
