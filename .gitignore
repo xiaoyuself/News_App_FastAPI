@@ -36,8 +36,6 @@ _scratch/
 docker-compose.yml
 Dockerfile
 .dockerignore
-# 数据库结构与初始数据（服务器上单独维护）
-database.sql
 # 本地文档（部署手册、优化记录）
 Docker部署速查手册.md
 优化说明.md

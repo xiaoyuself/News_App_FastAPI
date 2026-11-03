@@ -60,8 +60,13 @@
 
 ### 1. 准备依赖服务
 
-- **MySQL 8**：建库 `news_app`。表结构见 `news_check_system(back)/models/` 下的 ORM 模型
-  （建库脚本与初始演示数据不在本仓库，请自行准备）
+- **MySQL 8**：导入仓库根目录的 `database.sql` 即可完成建库、建表与写入演示数据
+  （8 个分类、403 条新闻、若干演示账号）：
+
+  ```bash
+  mysql -uroot -p --default-character-set=utf8mb4 < database.sql
+  ```
+
 - **Redis 7**：用于新闻分类 / 列表缓存。**建议先启动 Redis 再启动后端**
   （缓存异常会被捕获并降级到数据库，但首次连接失败会拖慢首个请求）
 
