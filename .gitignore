@@ -30,3 +30,14 @@ _scratch/
 
 # 评估基线备份（对比用的中间产物，运行时生成）
 *.before.json
+
+# ---------- 以下仅本地/服务器使用，不纳入仓库 ----------
+# 部署相关：容器编排与镜像定义（需要时用 git add -f 强制加入）
+docker-compose.yml
+Dockerfile
+.dockerignore
+# 数据库结构与初始数据（服务器上单独维护）
+database.sql
+# 本地文档（部署手册、优化记录）
+Docker部署速查手册.md
+优化说明.md
